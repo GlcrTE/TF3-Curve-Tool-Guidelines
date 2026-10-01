@@ -139,5 +139,26 @@ return function(load)
 		assert(chain.segments[3] and not chain.segments[1] and not chain.segments[2])
 	end)
 
+	test("end splitting an existing street is connected", function()
+		-- dragging from node 5 up to -1, which splits the street 10 -> 11
+		local segs = {
+			seg(5, 0, -80, -1, 0, 0, 0, 80, 0, 80),
+			seg(10, -100, 0, -1, 0, 0, 100, 0, 100, 0),
+			seg(-1, 0, 0, 11, 100, 0, 100, 0, 100, 0),
+		}
+		local chain = g.findChain(segs, g.vec(1, 1))
+		assert(nearV(chain.e, 0, 0) and chain.connected)
+	end)
+
+	test("free end is not connected", function()
+		local chain = g.findChain({ seg(5, 0, -80, -1, 0, 0, 0, 80, 0, 80) }, g.vec(1, 1))
+		assert(nearV(chain.e, 0, 0) and not chain.connected)
+	end)
+
+	test("end on an existing node is connected", function()
+		local chain = g.findChain({ seg(-1, 0, -80, 7, 0, 0, 0, 80, 0, 80) }, g.vec(1, 1))
+		assert(nearV(chain.e, 0, 0) and chain.connected)
+	end)
+
 	return results
 end

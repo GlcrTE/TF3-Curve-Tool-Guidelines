@@ -32,6 +32,8 @@ local CONFIG <const> = {
 	-- following within cancelDelay seconds.
 	cancelMove = 2.0,
 	cancelDelay = 0.15,
+	-- writes builder events, cursor positions and clear decisions to the game log
+	debugLog = true,
 }
 
 local RENDER_ZONES <const> = 1
@@ -256,6 +258,8 @@ local record Chain
 	dirS : V2
 	-- indices of the chain's segments in the segment list
 	segments : {integer : boolean}
+	-- the dragged end snapped onto an existing node or street
+	connected : boolean
 end
 
 local function toV2(p : Vec3f) : V2
@@ -307,17 +311,20 @@ local function findChain(segs : {Seg}, mouse : V2) : Chain
 		pos[sg.n1] = sg.p1
 	end
 
-	-- the dragged end is the open chain end closest to the cursor
+	-- the dragged end is the chain end closest to the cursor. A chain end is an
+	-- open end, or a junction where the end splits an existing street.
 	local endNode : Engine.Entity = segs[#segs].n1
 	if mouse ~= nil then
 		local best = math.huge
 		for node, deg in pairs(degree) do
 			local d = dist(toV2(pos[node]), mouse)
-			if deg == 1 and d < best then
+			if deg ~= 2 and d < best then
 				best, endNode = d, node
 			end
 		end
 	end
+	-- new nodes have negative ids, existing ones are entities
+	local connected = endNode >= 0 or degree[endNode] >= 3
 
 	local visited : {integer : boolean} = {}
 	local current = endNode
@@ -355,6 +362,7 @@ local function findChain(segs : {Seg}, mouse : V2) : Chain
 		dirE = dirE,
 		dirS = dirS,
 		segments = visited,
+		connected = connected,
 	}
 end
 
@@ -452,6 +460,10 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 		return shapes
 	end
 	local chain = findChain(segs, mouse)
+	if chain.connected then
+		-- the end is already attached to the network: guidelines would only distract
+		return shapes
+	end
 	local E, S = chain.e, chain.s
 
 	local lines : {Line} = {}
@@ -686,6 +698,22 @@ end
 -- Builder tracking
 ---------------------------------------------------------------------------
 
+local lastLogTime = 0.0
+local framesSinceLog = 0
+
+local function log(msg : string)
+	if CONFIG.debugLog then
+		debugPrint(MOD_TAG .. " " .. string.format("%.3f", os.clock()) .. " " .. msg)
+	end
+end
+
+local function fmtV2(p : V2) : string
+	if p == nil then
+		return "nil"
+	end
+	return string.format("(%.1f, %.1f)", p.x, p.y)
+end
+
 -- cursor position and cancel distance when the current guidelines were built
 local eventMouse : V2 = nil
 local eventMoveLimit = 0.0
@@ -700,8 +728,9 @@ local function terrainMouse() : V2
 	return nil
 end
 
-local function clear()
+local function clear(reason : string)
 	if shown then
+		log("clear: " .. reason)
 		render({})
 	end
 	eventMouse = nil
@@ -711,6 +740,8 @@ end
 local function onProposal(sp : Proposal.StreetProposal)
 	local mouse = terrainMouse()
 	local shapes = buildShapes(sp, mouse)
+	log("proposalCreate: segments=" .. tostring(#(sp.addedSegments or {})) .. " mouse=" .. fmtV2(mouse)
+		.. " shapes=" .. tostring(#shapes) .. " native=" .. type((sp as any as {string : any})["addedNodes_native"]))
 	render(shapes)
 	eventMouse = mouse
 	eventMoveLimit = CONFIG.cancelMove
@@ -742,12 +773,19 @@ function guidelines.guiUpdate(_userParams : table, _state : GameScriptStateReadO
 		return
 	end
 	local mouse = terrainMouse()
+	framesSinceLog = framesSinceLog + 1
+	if CONFIG.debugLog and os.clock() - lastLogTime > 0.25 then
+		log("guiUpdate: frames=" .. tostring(framesSinceLog) .. " mouse=" .. fmtV2(mouse)
+			.. " eventMouse=" .. fmtV2(eventMouse) .. " limit=" .. string.format("%.1f", eventMoveLimit))
+		lastLogTime = os.clock()
+		framesSinceLog = 0
+	end
 	if eventMouse == nil or mouse == nil or dist(mouse, eventMouse) <= eventMoveLimit then
 		movedAt = nil
 	elseif movedAt == nil then
 		movedAt = os.clock()
 	elseif os.clock() - movedAt > CONFIG.cancelDelay then
-		clear()
+		clear("cursor moved without a new proposal")
 	end
 end
 
@@ -760,7 +798,7 @@ function guidelines.guiHandleEvent(_userParams : table, _state : GameScriptState
 			if proposal ~= nil and proposal.proposal ~= nil then
 				onProposal(proposal.proposal)
 			else
-				clear()
+				clear("event without street proposal")
 			end
 		end)
 		if not ok and not errorReported then
@@ -768,7 +806,8 @@ function guidelines.guiHandleEvent(_userParams : table, _state : GameScriptState
 			debugPrint(MOD_TAG .. " error while building guidelines: " .. tostring(err))
 		end
 	elseif name == "builder.proposalApply" then
-		pcall(clear)
+		log("proposalApply")
+		pcall(clear, "built")
 	end
 	-- the result reports build errors (see the base game's company script); report none
 	return nil
