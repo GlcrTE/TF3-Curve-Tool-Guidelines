@@ -18,6 +18,19 @@
             ],
             "yearFrom": 0,
             "yearTo": 0
+        },
+        {
+            "defaultIndex": 0,
+            "key": "glcrte_pg_snap",
+            "name": "Snap to guidelines (experimental)",
+            "tooltip": "Moves the dragged end onto a guideline, crossing point or curve target within 1.5 m. Experimental: it changes the builder's proposal directly.",
+            "uiType": "ComboBox",
+            "values": [
+                "Off",
+                "On"
+            ],
+            "yearFrom": 0,
+            "yearTo": 0
         }
     ],
     "postRunScript": {

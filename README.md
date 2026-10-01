@@ -5,7 +5,9 @@ A Transport Fever 3 mod that shows guidelines while you build streets and tracks
 While you drag a street or track, the mod looks at the open road ends and intersections within 100 m of the end you are dragging (build points in the middle of a road are ignored) and draws:
 
 - **Extension lines** that continue every road at those nodes straight ahead.
-- **Perpendicular lines** at those nodes, plus extension, perpendicular and **45° diagonals** at the node you started dragging from.
+- **Perpendicular lines** at those nodes.
+
+The road you are extending (every road attached to the node you start dragging from, up to its next intersection or open end) gives no guidelines. While the dragged end is attached to an existing street or node, no guidelines are shown at all.
 - **Crossing markers** where two guidelines intersect.
 - **Perfect curve targets**: for each guideline, the point where a circular arc that leaves your drag start in its current direction would meet the guideline tangentially. The arc is drawn in orange and its end point is marked.
 
@@ -20,7 +22,7 @@ Colours:
 
 Only guidelines within 40 m of the dragged end are shown, at most 8 at a time, so the view stays clean. Line width scales with the camera distance.
 
-The mod only draws. It does not move or snap your segments, and it does not change what gets built.
+By default the mod only draws. The experimental option "Snap to guidelines" moves the dragged end onto a crossing point, curve target or guideline within 1.5 m (in that order). It does this by writing into the builder's proposal while the builder asks scripts to check it, which the game does not officially support. The game log reports once per session whether the write was kept, and whether the built road contains the snapped end.
 
 ## How it works
 

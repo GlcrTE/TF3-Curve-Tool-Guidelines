@@ -10,6 +10,7 @@
 local MOD_TAG <const> = "[Precision Guidelines]"
 local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
 local RENDERER_PARAM <const> = "glcrte_pg_renderer"
+local SNAP_PARAM <const> = "glcrte_pg_snap"
 
 local CONFIG <const> = {
 	-- m: only open ends and intersections this close to the dragged end give guidelines
@@ -25,6 +26,8 @@ local CONFIG <const> = {
 	-- m drawn beyond the dragged end's projection onto a guideline
 	lineOverhang = 20.0,
 	minArcRadius = 8.0,
+	-- m: with snapping enabled, the dragged end jumps to a guideline this close
+	snapDistance = 1.5,
 	maxArcRadius = 3000.0,
 	-- the builder sends no event when a drag is cancelled. While dragging, every
 	-- cursor movement creates a new proposal within the same frame (measured:
@@ -260,6 +263,8 @@ local record Chain
 	segments : {integer : boolean}
 	-- the dragged end snapped onto an existing node or street
 	connected : boolean
+	endNode : Engine.Entity
+	startNode : Engine.Entity
 end
 
 local function toV2(p : Vec3f) : V2
@@ -363,22 +368,19 @@ local function findChain(segs : {Seg}, mouse : V2) : Chain
 		dirS = dirS,
 		segments = visited,
 		connected = connected,
+		endNode = endNode,
+		startNode = current,
 	}
 end
 
--- extension and perpendicular line at a segment end with tangent `t`,
--- plus 45° diagonals if the end is located at `diagonalsAt`
-local function addEndLines(a : V2, t : V2, out : {Line}, diagonalsAt : V2)
-	local u = t ~= nil and normalize(t) or nil
-	if a == nil or u == nil then
+-- extension and perpendicular line at a segment end with tangent `t`
+local function addEndLines(a : V2, t : V2, out : {Line})
+	local u = normalize(t)
+	if u == nil then
 		return
 	end
 	table.insert(out, { a = a, u = u })
 	table.insert(out, { a = a, u = perp(u) })
-	if diagonalsAt ~= nil and dist(a, diagonalsAt) < 0.5 then
-		table.insert(out, { a = a, u = rotate(u, math.pi / 4) })
-		table.insert(out, { a = a, u = rotate(u, -math.pi / 4) })
-	end
 end
 
 -- number of segments connected to an existing node: 1 = open end, 2 = build
@@ -393,9 +395,52 @@ local function nodeDegree(node : Engine.Entity, cache : {Engine.Entity : integer
 	return d
 end
 
--- lines at the ends of an existing segment that are the drag start, or an open
--- end or intersection within the search radius of the dragged end
-local function addEdgeLines(edge : Engine.Entity, out : {Line}, s : V2, e : V2, degrees : {Engine.Entity : integer})
+-- marks `edge` and the road it belongs to, followed through build points in the
+-- middle of the road (nodes with two segments) up to intersections and open ends
+local function markRoad(edge : Engine.Entity, out : {Engine.Entity : boolean}, degrees : {Engine.Entity : integer})
+	local pending : {Engine.Entity} = { edge }
+	local count = 0
+	while #pending > 0 and count < 500 do
+		local current = table.remove(pending)
+		if not out[current] then
+			out[current] = true
+			count = count + 1
+			local comp : Engine.Component.BaseEdge = api.engine.getComponent(current, api.type.ComponentType.BASE_EDGE)
+			if comp ~= nil then
+				for __, node in ipairs({ comp.node0, comp.node1 }) do
+					if node >= 0 and nodeDegree(node, degrees) == 2 then
+						for __, nextEdge in ipairs(api.engine.system.streetSystem.getNodeSegments(node) or {}) do
+							if not out[nextEdge] then
+								table.insert(pending, nextEdge)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- the roads attached to the drag start: they are what is being extended
+local function extendedRoads(sp : Proposal.StreetProposal, startNode : Engine.Entity,
+	degrees : {Engine.Entity : integer}) : {Engine.Entity : boolean}
+
+	local out : {Engine.Entity : boolean} = {}
+	if startNode ~= nil and startNode >= 0 then
+		for __, edge in ipairs(api.engine.system.streetSystem.getNodeSegments(startNode) or {}) do
+			markRoad(edge, out, degrees)
+		end
+	end
+	-- a street split by the drag start is replaced by the proposal
+	for __, sae in ipairs(sp.removedSegments or {}) do
+		markRoad(sae.entity, out, degrees)
+	end
+	return out
+end
+
+-- lines at the ends of an existing segment that are open ends or intersections
+-- within the search radius of the dragged end
+local function addEdgeLines(edge : Engine.Entity, out : {Line}, e : V2, degrees : {Engine.Entity : integer})
 	local comp : Engine.Component.BaseEdge = api.engine.getComponent(edge, api.type.ComponentType.BASE_EDGE)
 	if comp == nil then
 		return
@@ -408,8 +453,8 @@ local function addEdgeLines(edge : Engine.Entity, out : {Line}, s : V2, e : V2, 
 		local node, p, t = en[1], en[2], en[3]
 		if p ~= nil and t ~= nil then
 			local a = toV2(p)
-			if dist(a, s) < 0.5 or (dist(a, e) <= CONFIG.searchRadius and nodeDegree(node, degrees) ~= 2) then
-				addEndLines(a, vec(t.x, t.y), out, s)
+			if dist(a, e) <= CONFIG.searchRadius and nodeDegree(node, degrees) ~= 2 then
+				addEndLines(a, vec(t.x, t.y), out)
 			end
 		end
 	end
@@ -418,6 +463,71 @@ end
 local function findEdges(center : V2, radius : number) : {Engine.Entity}
 	return api.engine.util.octree.findEntitiesInCircle(api.type.Vec2f.new(center.x, center.y), radius,
 		api.type.ComponentType.BASE_EDGE) or {}
+end
+
+---------------------------------------------------------------------------
+-- Snapping (experimental): moves the dragged end of the builder's proposal
+---------------------------------------------------------------------------
+
+local snapReported = false
+local applyReported = false
+-- target the last proposal was snapped to, if any
+local lastSnap : V2 = nil
+
+local function near3(p : Vec3f, x : number, y : number) : boolean
+	return p ~= nil and math.abs(p.x - x) < 1e-3 and math.abs(p.y - y) < 1e-3
+end
+
+-- Writes the target into the new end node (and the matching segment ends) of the
+-- proposal. `fresh` reads the proposal from the event again, to check whether the
+-- write reached the builder's object or only a copy. The first attempt is logged.
+local function applySnap(sp : Proposal.StreetProposal, fresh : function() : Proposal.StreetProposal,
+	endNode : Engine.Entity, target : V2) : boolean
+
+	local nodes = sp.addedNodes_native
+	if nodes == nil then
+		return false
+	end
+	local index = 0
+	local old : Vec3f = nil
+	for i = 1, nodes:size() do
+		local nae = nodes:at(i)
+		if nae.entity == endNode then
+			index = i
+			old = nae.comp.position
+			nae.comp.position = api.type.Vec3f.new(target.x, target.y, old.z)
+			break
+		end
+	end
+	if index == 0 then
+		return false
+	end
+
+	local segmentEnds = 0
+	local segments = sp.addedSegments_native
+	local count = segments ~= nil and segments:size() or 0
+	for i = 1, count do
+		local comp = segments:at(i).comp
+		if comp.node0 == endNode and near3(comp.position0, old.x, old.y) then
+			comp.position0 = api.type.Vec3f.new(target.x, target.y, comp.position0.z)
+			segmentEnds = segmentEnds + 1
+		elseif comp.node1 == endNode and near3(comp.position1, old.x, old.y) then
+			comp.position1 = api.type.Vec3f.new(target.x, target.y, comp.position1.z)
+			segmentEnds = segmentEnds + 1
+		end
+	end
+
+	local inVector = near3(nodes:at(index).comp.position, target.x, target.y)
+	local again = fresh()
+	local inEvent = again ~= nil and again.addedNodes_native ~= nil and index <= again.addedNodes_native:size()
+		and near3(again.addedNodes_native:at(index).comp.position, target.x, target.y)
+	if not snapReported then
+		snapReported = true
+		debugPrint(MOD_TAG .. " snap experiment: node write " .. (inVector and "kept" or "lost")
+			.. " in the vector, " .. (inEvent and "kept" or "lost") .. " in the event's proposal, "
+			.. tostring(segmentEnds) .. " segment ends updated")
+	end
+	return inEvent
 end
 
 ---------------------------------------------------------------------------
@@ -453,8 +563,40 @@ local record ArcCandidate
 	d : number
 end
 
-local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
+-- the snap target within snapDistance: the closest crossing point, else the
+-- closest curve target, else the closest point on a guideline
+local function findSnapTarget(e : V2, visible : {Candidate}, crossings : {V2}, arcs : {ArcCandidate}) : V2
+	local best : V2 = nil
+	local bestD = CONFIG.snapDistance
+	for __, x in ipairs(crossings) do
+		if dist(x, e) < bestD then
+			best, bestD = x, dist(x, e)
+		end
+	end
+	if best ~= nil then
+		return best
+	end
+	for __, a in ipairs(arcs) do
+		if a.d < bestD then
+			best, bestD = a.arc.t, a.d
+		end
+	end
+	if best ~= nil then
+		return best
+	end
+	for __, c in ipairs(visible) do
+		if c.d < bestD then
+			best, bestD = project(c.line, e), c.d
+		end
+	end
+	return best
+end
+
+local function buildShapes(sp : Proposal.StreetProposal, mouse : V2, snap : boolean,
+	fresh : function() : Proposal.StreetProposal) : {Shape}
+
 	local shapes : {Shape} = {}
+	lastSnap = nil
 	local segs = readSegments(sp)
 	if #segs == 0 then
 		return shapes
@@ -466,34 +608,21 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	end
 	local E, S = chain.e, chain.s
 
+	-- the road being extended gives no guidelines
 	local lines : {Line} = {}
 	local degrees : {Engine.Entity : integer} = {}
+	local skip = extendedRoads(sp, chain.startNode, degrees)
 	for __, edge in ipairs(findEdges(E, CONFIG.searchRadius)) do
-		addEdgeLines(edge, lines, S, E, degrees)
-	end
-	if dist(S, E) > CONFIG.searchRadius - 20 then
-		for __, edge in ipairs(findEdges(S, 20.0)) do
-			addEdgeLines(edge, lines, S, E, degrees)
-		end
-	end
-	-- new segments outside the dragged chain at the drag start, e.g. the halves
-	-- of a street split there
-	for i, sg in ipairs(segs) do
-		if not chain.segments[i] then
-			if dist(toV2(sg.p0), S) < 0.5 then
-				addEndLines(S, sg.t0, lines, S)
-			end
-			if dist(toV2(sg.p1), S) < 0.5 then
-				addEndLines(S, sg.t1, lines, S)
-			end
+		if not skip[edge] then
+			addEdgeLines(edge, lines, E, degrees)
 		end
 	end
 	lines = dedupe(lines, E)
 
 	local visible : {Candidate} = {}
 	for __, l in ipairs(lines) do
-		-- lines anchored at the dragged end itself (snapped onto a node) say nothing
-		if dist(l.a, E) > 1.0 then
+		-- lines through the drag start or the dragged end say nothing
+		if dist(l.a, E) > 1.0 and dist(l.a, S) > 1.0 then
 			local d = math.abs(signedDistance(l, E))
 			if d < CONFIG.showDistance then
 				table.insert(visible, { line = l, d = d })
@@ -505,40 +634,19 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 		table.remove(visible)
 	end
 
-	local w = lineWidth(E, chain.ez)
-	local uE = chain.dirE ~= nil and normalize(chain.dirE) or nil
-
-	for __, c in ipairs(visible) do
-		local l = c.line
-		local hit = c.d < CONFIG.hitTolerance
-		local parallel = uE ~= nil and math.abs(cross(uE, l.u)) < CONFIG.parallelTolerance
-		local p = project(l, E)
-		local out = dot(sub(p, l.a), l.u) >= 0 and l.u or mul(l.u, -1)
-		table.insert(shapes, {
-			points = { l.a, add(p, mul(out, CONFIG.lineOverhang)) },
-			radius = 0,
-			width = hit and w * 1.6 or w,
-			color = hit and (parallel and COLOR_PERFECT or COLOR_HIT) or COLOR_GUIDE,
-		})
-	end
-
+	local crossings : {V2} = {}
 	for i = 1, #visible do
 		for j = i + 1, #visible do
 			local x = intersect(visible[i].line, visible[j].line)
 			if x ~= nil and dist(x, E) < CONFIG.showDistance then
-				table.insert(shapes, {
-					points = { x },
-					radius = w * 2.5,
-					width = w,
-					color = dist(x, E) < 2 * CONFIG.hitTolerance and COLOR_HIT or COLOR_GUIDE,
-				})
+				table.insert(crossings, x)
 			end
 		end
 	end
 
+	local arcs : {ArcCandidate} = {}
 	local dS = chain.dirS ~= nil and normalize(chain.dirS) or nil
 	if dS ~= nil and dist(S, E) > 1.0 then
-		local arcs : {ArcCandidate} = {}
 		for __, c in ipairs(visible) do
 			if math.abs(signedDistance(c.line, S)) > 1.0 then
 				for __, arc in ipairs(tangentArcs(S, dS, c.line, CONFIG.minArcRadius, CONFIG.maxArcRadius)) do
@@ -550,22 +658,59 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 			end
 		end
 		table.sort(arcs, function(a : ArcCandidate, b : ArcCandidate) : boolean return a.d < b.d end)
-		for i = 1, math.min(#arcs, CONFIG.maxArcs) do
-			local arc = arcs[i].arc
-			local onTarget = arcs[i].d < 2 * CONFIG.hitTolerance
-			table.insert(shapes, {
-				points = arcPoints(arc, 2.0),
-				radius = 0,
-				width = w * 0.7,
-				color = onTarget and COLOR_PERFECT or COLOR_ARC,
-			})
-			table.insert(shapes, {
-				points = { arc.t },
-				radius = w * 3,
-				width = w,
-				color = onTarget and COLOR_PERFECT or COLOR_ARC,
-			})
+		while #arcs > CONFIG.maxArcs do
+			table.remove(arcs)
 		end
+	end
+
+	if snap and chain.endNode < 0 then
+		local target = findSnapTarget(E, visible, crossings, arcs)
+		if target ~= nil and dist(target, E) > 1e-3 and applySnap(sp, fresh, chain.endNode, target) then
+			E = target
+			lastSnap = target
+		end
+	end
+
+	local w = lineWidth(E, chain.ez)
+	local uE = chain.dirE ~= nil and normalize(chain.dirE) or nil
+
+	for __, c in ipairs(visible) do
+		local l = c.line
+		local hit = math.abs(signedDistance(l, E)) < CONFIG.hitTolerance
+		local parallel = uE ~= nil and math.abs(cross(uE, l.u)) < CONFIG.parallelTolerance
+		local p = project(l, E)
+		local out = dot(sub(p, l.a), l.u) >= 0 and l.u or mul(l.u, -1)
+		table.insert(shapes, {
+			points = { l.a, add(p, mul(out, CONFIG.lineOverhang)) },
+			radius = 0,
+			width = hit and w * 1.6 or w,
+			color = hit and (parallel and COLOR_PERFECT or COLOR_HIT) or COLOR_GUIDE,
+		})
+	end
+
+	for __, x in ipairs(crossings) do
+		table.insert(shapes, {
+			points = { x },
+			radius = w * 2.5,
+			width = w,
+			color = dist(x, E) < 2 * CONFIG.hitTolerance and COLOR_HIT or COLOR_GUIDE,
+		})
+	end
+
+	for __, a in ipairs(arcs) do
+		local onTarget = dist(a.arc.t, E) < 2 * CONFIG.hitTolerance
+		table.insert(shapes, {
+			points = arcPoints(a.arc, 2.0),
+			radius = 0,
+			width = w * 0.7,
+			color = onTarget and COLOR_PERFECT or COLOR_ARC,
+		})
+		table.insert(shapes, {
+			points = { a.arc.t },
+			radius = w * 3,
+			width = w,
+			color = onTarget and COLOR_PERFECT or COLOR_ARC,
+		})
 	end
 
 	return shapes
@@ -660,25 +805,34 @@ local function drawPoints(shapes : {Shape})
 	end
 end
 
-local rendererMode : integer = nil
+local paramCache : {string : integer} = {}
 
--- "Renderer" mod option (1-based index); the key is unique, so it is found
--- regardless of how the params are namespaced
-local function getRendererMode() : integer
-	if rendererMode == nil then
-		rendererMode = RENDER_ZONES
+-- mod option value (1-based index). The keys are unique, so they are found
+-- regardless of how the params are namespaced.
+local function getParam(key : string, default : integer) : integer
+	if paramCache[key] == nil then
+		paramCache[key] = default
 		local ok, params = pcall(api.engine.config.getModParams)
 		if ok and params ~= nil then
 			for __, modParams in pairs(params as {string : {string : any}}) do
-				local v = modParams[RENDERER_PARAM]
+				local v = modParams[key]
 				if type(v) == "number" then
-					rendererMode = math.floor(v as number)
+					paramCache[key] = math.floor(v as number)
 				end
 			end
 		end
-		debugPrint(MOD_TAG .. " renderer mode " .. tostring(rendererMode))
+		debugPrint(MOD_TAG .. " option " .. key .. " = " .. tostring(paramCache[key]))
 	end
-	return rendererMode
+	return paramCache[key]
+end
+
+local function getRendererMode() : integer
+	return getParam(RENDERER_PARAM, RENDER_ZONES)
+end
+
+-- option values: 1 = off, 2 = on
+local function isSnapEnabled() : boolean
+	return getParam(SNAP_PARAM, 1) == 2
 end
 
 local shown = false
@@ -736,9 +890,9 @@ local function clear(reason : string)
 	movedAt = nil
 end
 
-local function onProposal(sp : Proposal.StreetProposal)
+local function onProposal(sp : Proposal.StreetProposal, fresh : function() : Proposal.StreetProposal)
 	local mouse = terrainMouse()
-	local shapes = buildShapes(sp, mouse)
+	local shapes = buildShapes(sp, mouse, isSnapEnabled(), fresh)
 	log("proposalCreate: segments=" .. tostring(#(sp.addedSegments or {})) .. " mouse=" .. fmtV2(mouse)
 		.. " shapes=" .. tostring(#shapes) .. " native=" .. type((sp as any as {string : any})["addedNodes_native"]))
 	render(shapes)
@@ -788,9 +942,13 @@ function guidelines.guiHandleEvent(_userParams : table, _state : GameScriptState
 
 	if name == "builder.proposalCreate" then
 		local ok, err : boolean, any = pcall(function()
+			local fresh = function() : Proposal.StreetProposal
+				local again = (param as {Proposal, ProposalData})[1]
+				return again ~= nil and again.proposal or nil
+			end
 			local proposal = (param as {Proposal, ProposalData})[1]
 			if proposal ~= nil and proposal.proposal ~= nil then
-				onProposal(proposal.proposal)
+				onProposal(proposal.proposal, fresh)
 			else
 				clear("event without street proposal")
 			end
@@ -801,6 +959,18 @@ function guidelines.guiHandleEvent(_userParams : table, _state : GameScriptState
 		end
 	elseif name == "builder.proposalApply" then
 		log("proposalApply")
+		if lastSnap ~= nil and not applyReported then
+			applyReported = true
+			pcall(function()
+				local proposal = (param as {Proposal, ProposalData})[1]
+				local found = false
+				for __, nae in ipairs(proposal.proposal.addedNodes or {}) do
+					found = found or dist(toV2(nae.comp.position), lastSnap) < 0.01
+				end
+				debugPrint(MOD_TAG .. " snap experiment: built proposal " .. (found and "contains" or "does not contain")
+					.. " the snapped end " .. string.format("(%.2f, %.2f)", lastSnap.x, lastSnap.y))
+			end)
+		end
 		pcall(clear, "built")
 	end
 	-- the result reports build errors (see the base game's company script); report none
