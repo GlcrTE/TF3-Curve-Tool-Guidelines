@@ -7,7 +7,7 @@
     ],
     "description": "Shows guidelines while you build streets and tracks: the extension and perpendicular of nearby open road ends and intersections, and the points where those guidelines cross. A guideline turns green when the end you are dragging is on it, and gold when the new road also arrives parallel to it and continues it seamlessly.",
     "name": "Curve Tool - Guidelines",
-    "summary": "Guidelines from nearby road ends and intersections while you build streets and tracks.",
+    "summary": "Guidelines for easy curves.",
     "tags": [
         "Script Mod"
     ],
