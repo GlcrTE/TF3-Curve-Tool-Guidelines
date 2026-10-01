@@ -51,7 +51,7 @@ local record V2
 	y : number
 end
 
--- infinite line through anchor `a` with unit direction `u`
+-- ray from anchor `a` in unit direction `u`
 local record Line
 	a : V2
 	u : V2
@@ -123,8 +123,15 @@ local function intersect(l1 : Line, l2 : Line) : V2
 	return add(l1.a, mul(l1.u, cross(sub(l2.a, l1.a), l2.u) / den))
 end
 
+-- position of the projection of `p` along the ray (negative: behind the anchor)
+local function along(l : Line, p : V2) : number
+	return dot(sub(p, l.a), l.u)
+end
+
+-- rays on the same line pointing the same way
 local function sameLine(l1 : Line, l2 : Line) : boolean
-	return math.abs(cross(l1.u, l2.u)) < 2e-3 and math.abs(signedDistance(l1, l2.a)) < 0.05
+	return dot(l1.u, l2.u) > 0 and math.abs(cross(l1.u, l2.u)) < 2e-3
+		and math.abs(signedDistance(l1, l2.a)) < 0.05
 end
 
 -- removes duplicate lines, keeping the anchor closest to `ref`
@@ -299,13 +306,26 @@ local function findChain(segs : {Seg}, mouse : V2) : Chain
 end
 
 -- extension and perpendicular line at a segment end with tangent `t`
-local function addEndLines(a : V2, t : V2, out : {Line})
-	local u = normalize(t)
-	if u == nil then
-		return
+local RAY_CLEARANCE <const> = math.cos(math.rad(20))
+
+-- Guideline directions at a road end: the extension (`outward`, pointing away
+-- from the road) and both perpendiculars. Directions running along a road that
+-- leaves the same node (`leaving`, unit vectors) are dropped, so no guideline
+-- lies on top of an existing street.
+local function rayDirections(outward : V2, leaving : {V2}) : {V2}
+	local out : {V2} = {}
+	for __, u in ipairs({ outward, perp(outward), mul(perp(outward), -1) }) do
+		local free = true
+		for __, l in ipairs(leaving) do
+			if dot(u, l) > RAY_CLEARANCE then
+				free = false
+			end
+		end
+		if free then
+			table.insert(out, u)
+		end
 	end
-	table.insert(out, { a = a, u = u })
-	table.insert(out, { a = a, u = perp(u) })
+	return out
 end
 
 -- number of segments connected to an existing node: 1 = open end, 2 = build
@@ -375,22 +395,47 @@ end
 
 -- lines at the ends of an existing segment that are open ends or intersections
 -- within the search radius of the dragged end, except at `skipNodes`
+-- unit directions in which the segments at `node` leave it
+local function leavingDirections(node : Engine.Entity) : {V2}
+	local out : {V2} = {}
+	for __, edge in ipairs(api.engine.system.streetSystem.getNodeSegments(node) or {}) do
+		local comp : Engine.Component.BaseEdge = api.engine.getComponent(edge, api.type.ComponentType.BASE_EDGE)
+		if comp ~= nil then
+			local u : V2 = nil
+			if comp.node0 == node then
+				u = normalize(vec(comp.tangent0.x, comp.tangent0.y))
+			elseif comp.node1 == node then
+				u = normalize(vec(-comp.tangent1.x, -comp.tangent1.y))
+			end
+			if u ~= nil then
+				table.insert(out, u)
+			end
+		end
+	end
+	return out
+end
+
+-- guideline rays at the ends of an existing segment that are open ends or
+-- intersections within the search radius of the dragged end, except at `skipNodes`
 local function addEdgeLines(edge : Engine.Entity, out : {Line}, e : V2, degrees : {Engine.Entity : integer},
 	skipNodes : {Engine.Entity : boolean})
 	local comp : Engine.Component.BaseEdge = api.engine.getComponent(edge, api.type.ComponentType.BASE_EDGE)
 	if comp == nil then
 		return
 	end
-	local ends : {{Engine.Entity, Vec3f, Vec3f}} = {
-		{ comp.node0, nodePosition(comp.node0, {}) or comp.position0, comp.tangent0 },
-		{ comp.node1, nodePosition(comp.node1, {}) or comp.position1, comp.tangent1 },
+	-- the tangents point from node0 to node1, so away from the road at node1 only
+	local ends : {{Engine.Entity, Vec3f, V2}} = {
+		{ comp.node0, nodePosition(comp.node0, {}) or comp.position0, vec(-comp.tangent0.x, -comp.tangent0.y) },
+		{ comp.node1, nodePosition(comp.node1, {}) or comp.position1, vec(comp.tangent1.x, comp.tangent1.y) },
 	}
 	for __, en in ipairs(ends) do
-		local node, p, t = en[1], en[2], en[3]
-		if p ~= nil and t ~= nil then
+		local node, p, outward = en[1], en[2], normalize(en[3])
+		if p ~= nil and outward ~= nil then
 			local a = toV2(p)
 			if not skipNodes[node] and dist(a, e) <= CONFIG.searchRadius and nodeDegree(node, degrees) ~= 2 then
-				addEndLines(a, vec(t.x, t.y), out)
+				for __, u in ipairs(rayDirections(outward, leavingDirections(node))) do
+					table.insert(out, { a = a, u = u })
+				end
 			end
 		end
 	end
@@ -455,8 +500,9 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 
 	local visible : {Candidate} = {}
 	for __, l in ipairs(lines) do
-		-- lines through the drag start or the dragged end say nothing
-		if dist(l.a, E) > 1.0 and dist(l.a, S) > 1.0 then
+		-- rays from the drag start or the dragged end say nothing, and a ray
+		-- only guides ahead of its anchor
+		if dist(l.a, E) > 1.0 and dist(l.a, S) > 1.0 and along(l, E) > 0 then
 			local d = math.abs(signedDistance(l, E))
 			if d < CONFIG.showDistance then
 				table.insert(visible, { line = l, d = d })
@@ -471,8 +517,9 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	local crossings : {V2} = {}
 	for i = 1, #visible do
 		for j = i + 1, #visible do
-			local x = intersect(visible[i].line, visible[j].line)
-			if x ~= nil and dist(x, E) < CONFIG.showDistance then
+			local li, lj = visible[i].line, visible[j].line
+			local x = intersect(li, lj)
+			if x ~= nil and along(li, x) > 0 and along(lj, x) > 0 and dist(x, E) < CONFIG.showDistance then
 				table.insert(crossings, x)
 			end
 		end
@@ -750,6 +797,7 @@ end
 ;(guidelines as any as {string : any})["geometry"] = {
 	vec = vec, dist = dist, intersect = intersect, dedupe = dedupe,
 	signedDistance = signedDistance, ribbon = ribbon, findChain = findChain,
+	rayDirections = rayDirections,
 }
 
 return guidelines

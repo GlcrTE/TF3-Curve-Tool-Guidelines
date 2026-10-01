@@ -4,8 +4,10 @@ A Transport Fever 3 mod that shows guidelines while you build streets and tracks
 
 While you drag a street or track, the mod looks at the open road ends and intersections within 100 m of the end you are dragging (build points in the middle of a road are ignored) and draws:
 
-- **Extension lines** that continue every road at those nodes straight ahead.
-- **Perpendicular lines** at those nodes.
+- **Extension lines** that continue every road at those nodes straight ahead, pointing away from the road.
+- **Perpendicular lines** at those nodes, to both sides.
+
+Guidelines are one-way rays starting at the node, so they never run back over the road they come from. A ray that would run along another road leaving the same node (within 20°) is left out, e.g. the continuation of a road straight through a crossing.
 
 The road you are extending (every road attached to the node you start dragging from, up to its next intersection or open end) gives no guidelines, and neither does the intersection or open end where it stops. While the dragged end is attached to an existing street or node, no guidelines are shown at all.
 - **Crossing markers** where two guidelines intersect.

@@ -37,9 +37,32 @@ return function(load)
 	end)
 
 	test("dedupe keeps the anchor closest to the reference", function()
-		local out = g.dedupe({ line(0, 0, 1, 0), line(50, 0, -1, 0), line(0, 1, 1, 0) }, g.vec(60, 0))
+		local out = g.dedupe({ line(0, 0, 1, 0), line(50, 0, 1, 0), line(0, 1, 1, 0) }, g.vec(60, 0))
 		assert(#out == 2, "got " .. #out .. " lines")
 		assert(nearV(out[1].a, 50, 0))
+	end)
+
+	test("dedupe keeps opposite rays on the same line", function()
+		assert(#g.dedupe({ line(0, 0, 1, 0), line(50, 0, -1, 0) }, g.vec(25, 0)) == 2)
+	end)
+
+	test("open end: extension and both perpendiculars", function()
+		-- road leaves the node westwards, so the extension points east
+		local dirs = g.rayDirections(g.vec(1, 0), { g.vec(-1, 0) })
+		assert(#dirs == 3 and nearV(dirs[1], 1, 0))
+	end)
+
+	test("crossing: no ray along the roads leaving the node", function()
+		-- straight crossing: roads leave west, east, north and south
+		local leaving = { g.vec(-1, 0), g.vec(1, 0), g.vec(0, 1), g.vec(0, -1) }
+		assert(#g.rayDirections(g.vec(1, 0), leaving) == 0)
+	end)
+
+	test("T-junction: perpendicular into the branch is dropped", function()
+		-- main road leaves west, branch leaves north (slightly curved)
+		local u = g.vec(math.cos(math.rad(80)), math.sin(math.rad(80)))
+		local dirs = g.rayDirections(g.vec(1, 0), { g.vec(-1, 0), u })
+		assert(#dirs == 2 and nearV(dirs[1], 1, 0) and nearV(dirs[2], 0, -1))
 	end)
 
 	test("ribbon outlines a segment", function()
