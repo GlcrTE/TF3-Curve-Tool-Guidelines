@@ -479,6 +479,25 @@ local record Candidate
 	d : number
 end
 
+-- A new road can only connect to a node once, so each road end or intersection
+-- shows a single guideline: the first one per anchor in `sorted` (closest first).
+local function closestPerAnchor(sorted : {Candidate}) : {Candidate}
+	local out : {Candidate} = {}
+	for __, c in ipairs(sorted) do
+		local taken = false
+		for __, o in ipairs(out) do
+			if dist(o.line.a, c.line.a) < 0.5 then
+				taken = true
+				break
+			end
+		end
+		if not taken then
+			table.insert(out, c)
+		end
+	end
+	return out
+end
+
 local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	local shapes : {Shape} = {}
 	local segs = readSegments(sp)
@@ -515,6 +534,7 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 		end
 	end
 	table.sort(visible, function(a : Candidate, b : Candidate) : boolean return a.d < b.d end)
+	visible = closestPerAnchor(visible)
 	while #visible > CONFIG.maxLines do
 		table.remove(visible)
 	end
