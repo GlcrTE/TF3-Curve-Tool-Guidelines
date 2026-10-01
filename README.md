@@ -63,3 +63,7 @@ python tools/check.py [--game "<TF3 install dir>"]
 This checks that `_content.json` lists every file in `content/`, type-checks all `.tl` scripts against the game's definitions in `api/tealdef` and `base/tealdef`, and runs the tests in `tests/`. The Teal compiler is downloaded into `tools/.cache` on first use.
 
 Tuning values (search radius, show distance, tolerances, colours) are at the top of `guidelines.script.tl`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
