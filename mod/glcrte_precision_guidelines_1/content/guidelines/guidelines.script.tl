@@ -11,8 +11,10 @@ local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
 local RENDERER_PARAM <const> = "glcrte_pg_renderer"
 
 local CONFIG <const> = {
-	-- m: only open ends and intersections this close to the dragged end give guidelines
+	-- m: only intersections this close to the dragged end give guidelines
 	searchRadius = 100.0,
+	-- m: the same for open road ends
+	openEndRadius = 300.0,
 	-- m: guidelines further away from the dragged end are not drawn
 	showDistance = 40.0,
 	maxLines = 8,
@@ -415,8 +417,9 @@ local function leavingDirections(node : Engine.Entity) : {V2}
 	return out
 end
 
--- guideline rays at the ends of an existing segment that are open ends or
--- intersections within the search radius of the dragged end, except at `skipNodes`
+-- guideline rays at the ends of an existing segment that are open ends (within
+-- openEndRadius of the dragged end) or intersections (within searchRadius),
+-- except at `skipNodes`
 local function addEdgeLines(edge : Engine.Entity, out : {Line}, e : V2, degrees : {Engine.Entity : integer},
 	skipNodes : {Engine.Entity : boolean})
 	local comp : Engine.Component.BaseEdge = api.engine.getComponent(edge, api.type.ComponentType.BASE_EDGE)
@@ -432,7 +435,9 @@ local function addEdgeLines(edge : Engine.Entity, out : {Line}, e : V2, degrees 
 		local node, p, outward = en[1], en[2], normalize(en[3])
 		if p ~= nil and outward ~= nil then
 			local a = toV2(p)
-			if not skipNodes[node] and dist(a, e) <= CONFIG.searchRadius and nodeDegree(node, degrees) ~= 2 then
+			local degree = nodeDegree(node, degrees)
+			local radius = degree == 1 and CONFIG.openEndRadius or CONFIG.searchRadius
+			if not skipNodes[node] and degree ~= 2 and dist(a, e) <= radius then
 				for __, u in ipairs(rayDirections(outward, leavingDirections(node))) do
 					table.insert(out, { a = a, u = u })
 				end
@@ -491,7 +496,7 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	local lines : {Line} = {}
 	local degrees : {Engine.Entity : integer} = {}
 	local skipEdges, skipNodes = extendedRoads(sp, chain.startNode, degrees)
-	for __, edge in ipairs(findEdges(E, CONFIG.searchRadius)) do
+	for __, edge in ipairs(findEdges(E, math.max(CONFIG.searchRadius, CONFIG.openEndRadius))) do
 		if not skipEdges[edge] then
 			addEdgeLines(edge, lines, E, degrees, skipNodes)
 		end

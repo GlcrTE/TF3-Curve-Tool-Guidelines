@@ -2,7 +2,7 @@
 
 A Transport Fever 3 mod that shows guidelines while you build streets and tracks, similar to the guidelines in Cities: Skylines.
 
-While you drag a street or track, the mod looks at the open road ends and intersections within 100 m of the end you are dragging (build points in the middle of a road are ignored) and draws:
+While you drag a street or track, the mod looks at the open road ends within 300 m and the intersections within 100 m of the end you are dragging (build points in the middle of a road are ignored) and draws:
 
 - **Extension lines** that continue every road at those nodes straight ahead, pointing away from the road.
 - **Perpendicular lines** at those nodes, to both sides.
@@ -29,7 +29,7 @@ The mod only draws. It does not move or snap your segments: the builder event le
 `content/guidelines/guidelines.gs.lua` registers a game script. Its GUI part (`guidelines.script.tl`) listens to the builder's `builder.proposalCreate` event, which fires with the current street/track proposal while you drag:
 
 1. The new segments of the proposal are chained together. The open end closest to the mouse is the dragged end, the other end is the drag start.
-2. Existing segments near the dragged end are read with `api.engine.util.octree.findEntitiesInCircle`. A segment end that is an open end or an intersection (`api.engine.system.streetSystem.getNodeSegments` returns 1 or 3+ segments) within 100 m gives an extension line along its tangent and a perpendicular line.
+2. Existing segments near the dragged end are read with `api.engine.util.octree.findEntitiesInCircle`. A segment end that is an open end within 300 m or an intersection within 100 m (`api.engine.system.streetSystem.getNodeSegments` returns 1 or 3+ segments) gives an extension line along its tangent and a perpendicular line.
 3. The shapes are drawn as ground overlays through `api.gui.mission.setZone`, or as dotted lines through the engine's debug points. You can choose in the mod's settings ("Guideline renderer").
 
 The guidelines are removed when the segment is built. The builder sends no event when a drag is cancelled, but while dragging every mouse move produces a new proposal. In the game log a proposal followed every cursor movement within 3-5 ms. So when the cursor moves and no proposal follows within 0.1 s, the drag has ended (right-click, Esc, tool closed) and the guidelines are removed. Set `debugLog = true` in `guidelines.script.tl` to log builder events, cursor positions and clear decisions.
