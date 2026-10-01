@@ -3,8 +3,7 @@
 -- nearby network: the extension and the perpendicular of open road ends and
 -- intersections, and the crossing points of those lines.
 --
--- A guideline turns green when the dragged end lies on it, and gold when the
--- new segment also arrives parallel to it (a seamless continuation).
+-- A guideline turns green when the dragged end lies on it.
 
 local MOD_TAG <const> = "[Curve Tool - Guidelines]"
 local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
@@ -20,8 +19,6 @@ local CONFIG <const> = {
 	maxLines = 8,
 	-- m: the dragged end counts as "on" a guideline within this distance
 	hitTolerance = 0.3,
-	-- sine of the angle under which two directions count as parallel (0.5°)
-	parallelTolerance = math.sin(math.rad(0.5)),
 	-- m drawn beyond the dragged end's projection onto a guideline
 	lineOverhang = 20.0,
 	-- the builder sends no event when a drag is cancelled. While dragging, every
@@ -42,7 +39,6 @@ local DEBUG_LAYERS <const> = 1
 local type Color = {number, number, number, number}
 local COLOR_GUIDE : Color = { 0.35, 0.75, 1.0, 0.55 }
 local COLOR_HIT : Color = { 0.25, 1.0, 0.35, 0.85 }
-local COLOR_PERFECT : Color = { 1.0, 0.82, 0.2, 0.95 }
 
 ---------------------------------------------------------------------------
 -- 2D geometry (pure, no game API)
@@ -551,19 +547,17 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	end
 
 	local w = lineWidth(E, chain.ez)
-	local uE = chain.dirE ~= nil and normalize(chain.dirE) or nil
 
 	for __, c in ipairs(visible) do
 		local l = c.line
 		local hit = math.abs(signedDistance(l, E)) < CONFIG.hitTolerance
-		local parallel = uE ~= nil and math.abs(cross(uE, l.u)) < CONFIG.parallelTolerance
 		local p = project(l, E)
 		local out = dot(sub(p, l.a), l.u) >= 0 and l.u or mul(l.u, -1)
 		table.insert(shapes, {
 			points = { l.a, add(p, mul(out, CONFIG.lineOverhang)) },
 			radius = 0,
 			width = hit and w * 1.6 or w,
-			color = hit and (parallel and COLOR_PERFECT or COLOR_HIT) or COLOR_GUIDE,
+			color = hit and COLOR_HIT or COLOR_GUIDE,
 		})
 	end
 

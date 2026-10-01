@@ -5,7 +5,7 @@
             "role": "CREATOR"
         }
     ],
-    "description": "Shows guidelines from nearby road ends and intersections while you build streets and tracks. Green: you are on the line. Gold: you continue it seamlessly.",
+    "description": "Shows guidelines from nearby road ends and intersections while you build streets and tracks. A guideline turns green when you are on it.",
     "name": "Curve Tool - Guidelines",
     "summary": "Guidelines for easy curves.",
     "tags": [

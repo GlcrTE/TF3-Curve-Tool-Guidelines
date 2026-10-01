@@ -20,7 +20,6 @@ Colours:
 |--------|---------|
 | Blue | Guideline near the dragged end |
 | Green | The dragged end is on the guideline (within 0.3 m) |
-| Gold | On the guideline **and** arriving parallel to it: the new segment continues the guideline seamlessly |
 
 The mod only draws. It does not move or snap your segments: the builder event lets scripts report errors, but changes to its proposal have no effect (tested in-game).
 
