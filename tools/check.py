@@ -18,7 +18,7 @@ from lupa import LuaRuntime
 
 DEFAULT_GAME = r"D:\Games\SteamLibrary\steamapps\common\Transport Fever 3"
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-MOD_CONTENT = os.path.join(ROOT, "mod", "glcrte_precision_guidelines_1", "content")
+MOD_CONTENT = os.path.join(ROOT, "mod", "glcrte_curve_tool_guidelines_1", "content")
 CACHE = os.path.join(ROOT, "tools", ".cache")
 TL_URL = "https://raw.githubusercontent.com/teal-language/tl/master/tl.lua"
 

@@ -6,7 +6,7 @@
 -- A guideline turns green when the dragged end lies on it.
 
 local MOD_TAG <const> = "[Curve Tool - Guidelines]"
-local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
+local ZONE_PREFIX <const> = "glcrte_curve_tool_guidelines_"
 local RENDERER_PARAM <const> = "glcrte_pg_renderer"
 
 local CONFIG <const> = {

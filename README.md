@@ -43,7 +43,7 @@ The game log (`<Steam>\userdata\<your Steam ID>\3493540\local\crash_dump\stdout.
 
 ## Installation
 
-Copy `mod/glcrte_precision_guidelines_1` into your local TF3 mods folder:
+Copy `mod/glcrte_curve_tool_guidelines_1` into your local TF3 mods folder:
 
 ```
 <Steam>\userdata\<your Steam ID>\3493540\local\mods\

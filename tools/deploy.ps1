@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$modName = 'glcrte_precision_guidelines_1'
+$modName = 'glcrte_curve_tool_guidelines_1'
 $source = Join-Path $PSScriptRoot "..\mod\$modName"
 $userdata = 'C:\Program Files (x86)\Steam\userdata'
 $other = if ($Target -eq 'mods') { 'staging_area' } else { 'mods' }
