@@ -31,7 +31,7 @@ The mod only draws. It does not move or snap your segments, and it does not chan
 3. For the curve targets, the circle that touches the drag start's direction and a guideline is solved directly (two candidate radii per side). Only arcs up to 180° are used.
 4. The shapes are drawn as ground overlays through `api.gui.mission.setZone`, or as dotted lines through the engine's debug points. You can choose in the mod's settings ("Guideline renderer").
 
-The guidelines are removed when the segment is built. The builder sends no event when a drag is cancelled, but while dragging every mouse move produces a new proposal. So when the mouse moves on the terrain and no proposal follows within 0.15 s, the drag has ended and the guidelines are removed.
+The guidelines are removed when the segment is built. The builder sends no event when a drag is cancelled, but while dragging every mouse move produces a new proposal. In the game log a proposal followed every cursor movement within 3-5 ms. So when the cursor moves and no proposal follows within 0.1 s, the drag has ended (right-click, Esc, tool closed) and the guidelines are removed. Set `debugLog = true` in `guidelines.script.tl` to log builder events, cursor positions and clear decisions.
 
 ## Status
 

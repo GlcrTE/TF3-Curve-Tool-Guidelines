@@ -27,13 +27,13 @@ local CONFIG <const> = {
 	minArcRadius = 8.0,
 	maxArcRadius = 3000.0,
 	-- the builder sends no event when a drag is cancelled. While dragging, every
-	-- mouse move creates a new proposal, so guidelines are cleared once the mouse
-	-- has moved this far (m, scaled up with the camera distance) without one
-	-- following within cancelDelay seconds.
-	cancelMove = 2.0,
-	cancelDelay = 0.15,
+	-- cursor movement creates a new proposal within the same frame (measured:
+	-- 3-5 ms), so guidelines are cleared once the cursor has moved more than
+	-- cancelMove (m, ignores jitter) without a proposal within cancelDelay (s).
+	cancelMove = 0.05,
+	cancelDelay = 0.1,
 	-- writes builder events, cursor positions and clear decisions to the game log
-	debugLog = true,
+	debugLog = false,
 }
 
 local RENDER_ZONES <const> = 1
@@ -714,9 +714,8 @@ local function fmtV2(p : V2) : string
 	return string.format("(%.1f, %.1f)", p.x, p.y)
 end
 
--- cursor position and cancel distance when the current guidelines were built
+-- cursor position when the current guidelines were built
 local eventMouse : V2 = nil
-local eventMoveLimit = 0.0
 -- time at which the cursor left eventMouse
 local movedAt : number = nil
 local errorReported = false
@@ -744,11 +743,6 @@ local function onProposal(sp : Proposal.StreetProposal)
 		.. " shapes=" .. tostring(#shapes) .. " native=" .. type((sp as any as {string : any})["addedNodes_native"]))
 	render(shapes)
 	eventMouse = mouse
-	eventMoveLimit = CONFIG.cancelMove
-	if mouse ~= nil and api.gui.mouse.hasTerrainPosition() then
-		local z = api.gui.mouse.getTerrainPosition().z
-		eventMoveLimit = math.max(CONFIG.cancelMove, lineWidth(mouse, z) * 8)
-	end
 	movedAt = nil
 end
 
@@ -776,11 +770,11 @@ function guidelines.guiUpdate(_userParams : table, _state : GameScriptStateReadO
 	framesSinceLog = framesSinceLog + 1
 	if CONFIG.debugLog and os.clock() - lastLogTime > 0.25 then
 		log("guiUpdate: frames=" .. tostring(framesSinceLog) .. " mouse=" .. fmtV2(mouse)
-			.. " eventMouse=" .. fmtV2(eventMouse) .. " limit=" .. string.format("%.1f", eventMoveLimit))
+			.. " eventMouse=" .. fmtV2(eventMouse))
 		lastLogTime = os.clock()
 		framesSinceLog = 0
 	end
-	if eventMouse == nil or mouse == nil or dist(mouse, eventMouse) <= eventMoveLimit then
+	if eventMouse == nil or mouse == nil or dist(mouse, eventMouse) <= CONFIG.cancelMove then
 		movedAt = nil
 	elseif movedAt == nil then
 		movedAt = os.clock()
