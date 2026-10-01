@@ -12,8 +12,8 @@ local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
 local RENDERER_PARAM <const> = "glcrte_pg_renderer"
 
 local CONFIG <const> = {
-	-- m around the dragged end in which existing segments are considered
-	searchRadius = 300.0,
+	-- m: only open ends and intersections this close to the dragged end give guidelines
+	searchRadius = 100.0,
 	-- m: guidelines further away from the dragged end are not drawn
 	showDistance = 40.0,
 	maxLines = 8,
@@ -26,9 +26,12 @@ local CONFIG <const> = {
 	lineOverhang = 20.0,
 	minArcRadius = 8.0,
 	maxArcRadius = 3000.0,
-	-- s without builder events before guidelines are cleared, used only when
-	-- the active builder tool can not be detected
-	timeout = 3.0,
+	-- the builder sends no event when a drag is cancelled. While dragging, every
+	-- mouse move creates a new proposal, so guidelines are cleared once the mouse
+	-- has moved this far (m, scaled up with the camera distance) without one
+	-- following within cancelDelay seconds.
+	cancelMove = 2.0,
+	cancelDelay = 0.15,
 }
 
 local RENDER_ZONES <const> = 1
@@ -370,18 +373,37 @@ local function addEndLines(a : V2, t : V2, out : {Line}, diagonalsAt : V2)
 	end
 end
 
-local function addEdgeLines(edge : Engine.Entity, out : {Line}, diagonalsAt : V2)
+-- number of segments connected to an existing node: 1 = open end, 2 = build
+-- point in the middle of a road, 3+ = intersection
+local function nodeDegree(node : Engine.Entity, cache : {Engine.Entity : integer}) : integer
+	local d = cache[node]
+	if d == nil then
+		local segments = api.engine.system.streetSystem.getNodeSegments(node)
+		d = segments ~= nil and #segments or 0
+		cache[node] = d
+	end
+	return d
+end
+
+-- lines at the ends of an existing segment that are the drag start, or an open
+-- end or intersection within the search radius of the dragged end
+local function addEdgeLines(edge : Engine.Entity, out : {Line}, s : V2, e : V2, degrees : {Engine.Entity : integer})
 	local comp : Engine.Component.BaseEdge = api.engine.getComponent(edge, api.type.ComponentType.BASE_EDGE)
 	if comp == nil then
 		return
 	end
-	local p0 = nodePosition(comp.node0, {}) or comp.position0
-	local p1 = nodePosition(comp.node1, {}) or comp.position1
-	if p0 ~= nil and comp.tangent0 ~= nil then
-		addEndLines(toV2(p0), vec(comp.tangent0.x, comp.tangent0.y), out, diagonalsAt)
-	end
-	if p1 ~= nil and comp.tangent1 ~= nil then
-		addEndLines(toV2(p1), vec(comp.tangent1.x, comp.tangent1.y), out, diagonalsAt)
+	local ends : {{Engine.Entity, Vec3f, Vec3f}} = {
+		{ comp.node0, nodePosition(comp.node0, {}) or comp.position0, comp.tangent0 },
+		{ comp.node1, nodePosition(comp.node1, {}) or comp.position1, comp.tangent1 },
+	}
+	for __, en in ipairs(ends) do
+		local node, p, t = en[1], en[2], en[3]
+		if p ~= nil and t ~= nil then
+			local a = toV2(p)
+			if dist(a, s) < 0.5 or (dist(a, e) <= CONFIG.searchRadius and nodeDegree(node, degrees) ~= 2) then
+				addEndLines(a, vec(t.x, t.y), out, s)
+			end
+		end
 	end
 end
 
@@ -433,19 +455,25 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 	local E, S = chain.e, chain.s
 
 	local lines : {Line} = {}
+	local degrees : {Engine.Entity : integer} = {}
 	for __, edge in ipairs(findEdges(E, CONFIG.searchRadius)) do
-		addEdgeLines(edge, lines, S)
+		addEdgeLines(edge, lines, S, E, degrees)
 	end
 	if dist(S, E) > CONFIG.searchRadius - 20 then
 		for __, edge in ipairs(findEdges(S, 20.0)) do
-			addEdgeLines(edge, lines, S)
+			addEdgeLines(edge, lines, S, E, degrees)
 		end
 	end
-	-- new segments outside the dragged chain, e.g. the halves of a street split at the drag start
+	-- new segments outside the dragged chain at the drag start, e.g. the halves
+	-- of a street split there
 	for i, sg in ipairs(segs) do
 		if not chain.segments[i] then
-			addEndLines(toV2(sg.p0), sg.t0, lines, S)
-			addEndLines(toV2(sg.p1), sg.t1, lines, S)
+			if dist(toV2(sg.p0), S) < 0.5 then
+				addEndLines(S, sg.t0, lines, S)
+			end
+			if dist(toV2(sg.p1), S) < 0.5 then
+				addEndLines(S, sg.t1, lines, S)
+			end
 		end
 	end
 	lines = dedupe(lines, E)
@@ -636,7 +664,7 @@ local function getRendererMode() : integer
 				end
 			end
 		end
-		debugPrint(MOD_TAG, "renderer mode", rendererMode)
+		debugPrint(MOD_TAG .. " renderer mode " .. tostring(rendererMode))
 	end
 	return rendererMode
 end
@@ -658,40 +686,39 @@ end
 -- Builder tracking
 ---------------------------------------------------------------------------
 
--- event id of the builder that produced the current guidelines, if it can be
--- found among the active tool ids
-local activeTool : string = nil
-local lastEventTime = 0.0
+-- cursor position and cancel distance when the current guidelines were built
+local eventMouse : V2 = nil
+local eventMoveLimit = 0.0
+-- time at which the cursor left eventMouse
+local movedAt : number = nil
 local errorReported = false
 
-local function isToolActive(id : string) : boolean
-	local ok, ids = pcall(api.gui.contextHelper.getIdsOfActiveTool)
-	if not ok or ids == nil then
-		return false
+local function terrainMouse() : V2
+	if api.gui.mouse.hasTerrainPosition() then
+		return toV2(api.gui.mouse.getTerrainPosition())
 	end
-	for __, active in ipairs(ids as {string}) do
-		if active == id then
-			return true
-		end
-	end
-	return false
+	return nil
 end
 
 local function clear()
 	if shown then
 		render({})
 	end
-	activeTool = nil
+	eventMouse = nil
+	movedAt = nil
 end
 
-local function onProposal(id : string, sp : Proposal.StreetProposal)
-	local mouse : V2 = nil
-	if api.gui.mouse.hasTerrainPosition() then
-		mouse = toV2(api.gui.mouse.getTerrainPosition())
+local function onProposal(sp : Proposal.StreetProposal)
+	local mouse = terrainMouse()
+	local shapes = buildShapes(sp, mouse)
+	render(shapes)
+	eventMouse = mouse
+	eventMoveLimit = CONFIG.cancelMove
+	if mouse ~= nil and api.gui.mouse.hasTerrainPosition() then
+		local z = api.gui.mouse.getTerrainPosition().z
+		eventMoveLimit = math.max(CONFIG.cancelMove, lineWidth(mouse, z) * 8)
 	end
-	render(buildShapes(sp, mouse))
-	activeTool = isToolActive(id) and id or nil
-	lastEventTime = os.clock()
+	movedAt = nil
 end
 
 local record State
@@ -714,30 +741,31 @@ function guidelines.guiUpdate(_userParams : table, _state : GameScriptStateReadO
 	if not shown then
 		return
 	end
-	if activeTool ~= nil then
-		if not isToolActive(activeTool) then
-			clear()
-		end
-	elseif os.clock() - lastEventTime > CONFIG.timeout then
+	local mouse = terrainMouse()
+	if eventMouse == nil or mouse == nil or dist(mouse, eventMouse) <= eventMoveLimit then
+		movedAt = nil
+	elseif movedAt == nil then
+		movedAt = os.clock()
+	elseif os.clock() - movedAt > CONFIG.cancelDelay then
 		clear()
 	end
 end
 
 function guidelines.guiHandleEvent(_userParams : table, _state : GameScriptStateReadOnly<State>,
-	_guiState : GameScriptState<GuiState>, _src : string, id : string, name : string, param : any) : any
+	_guiState : GameScriptState<GuiState>, _src : string, _id : string, name : string, param : any) : any
 
 	if name == "builder.proposalCreate" then
 		local ok, err : boolean, any = pcall(function()
 			local proposal = (param as {Proposal, ProposalData})[1]
 			if proposal ~= nil and proposal.proposal ~= nil then
-				onProposal(id, proposal.proposal)
+				onProposal(proposal.proposal)
 			else
 				clear()
 			end
 		end)
 		if not ok and not errorReported then
 			errorReported = true
-			debugPrint(MOD_TAG, "error while building guidelines:", err)
+			debugPrint(MOD_TAG .. " error while building guidelines: " .. tostring(err))
 		end
 	elseif name == "builder.proposalApply" then
 		pcall(clear)
