@@ -1,15 +1,14 @@
 # Precision Guidelines (TF3)
 
-A Transport Fever 3 mod that shows guidelines while you build streets and tracks, similar to the guidelines and the Precision Engineering mod in Cities: Skylines.
+A Transport Fever 3 mod that shows guidelines while you build streets and tracks, similar to the guidelines in Cities: Skylines.
 
 While you drag a street or track, the mod looks at the open road ends and intersections within 100 m of the end you are dragging (build points in the middle of a road are ignored) and draws:
 
 - **Extension lines** that continue every road at those nodes straight ahead.
 - **Perpendicular lines** at those nodes.
 
-The road you are extending (every road attached to the node you start dragging from, up to its next intersection or open end) gives no guidelines. While the dragged end is attached to an existing street or node, no guidelines are shown at all.
+The road you are extending (every road attached to the node you start dragging from, up to its next intersection or open end) gives no guidelines, and neither does the intersection or open end where it stops. While the dragged end is attached to an existing street or node, no guidelines are shown at all.
 - **Crossing markers** where two guidelines intersect.
-- **Perfect curve targets**: for each guideline, the point where a circular arc that leaves your drag start in its current direction would meet the guideline tangentially. The arc is drawn in orange and its end point is marked.
 
 Colours:
 
@@ -17,12 +16,11 @@ Colours:
 |--------|---------|
 | Blue | Guideline near the dragged end |
 | Green | The dragged end is on the guideline (within 0.3 m) |
-| Gold | On the guideline **and** arriving parallel to it, or on a perfect curve target: the new segment continues the guideline seamlessly |
-| Orange | Perfect curve preview and target |
+| Gold | On the guideline **and** arriving parallel to it: the new segment continues the guideline seamlessly |
 
 Only guidelines within 40 m of the dragged end are shown, at most 8 at a time, so the view stays clean. Line width scales with the camera distance.
 
-By default the mod only draws. The experimental option "Snap to guidelines" moves the dragged end onto a crossing point, curve target or guideline within 1.5 m (in that order). It does this by writing into the builder's proposal while the builder asks scripts to check it, which the game does not officially support. The game log reports once per session whether the write was kept, and whether the built road contains the snapped end.
+The mod only draws. It does not move or snap your segments: the builder event lets scripts report errors, but changes to its proposal have no effect (tested in-game).
 
 ## How it works
 
@@ -30,8 +28,7 @@ By default the mod only draws. The experimental option "Snap to guidelines" move
 
 1. The new segments of the proposal are chained together. The open end closest to the mouse is the dragged end, the other end is the drag start.
 2. Existing segments near the dragged end are read with `api.engine.util.octree.findEntitiesInCircle`. A segment end that is an open end or an intersection (`api.engine.system.streetSystem.getNodeSegments` returns 1 or 3+ segments) within 100 m gives an extension line along its tangent and a perpendicular line.
-3. For the curve targets, the circle that touches the drag start's direction and a guideline is solved directly (two candidate radii per side). Only arcs up to 180° are used.
-4. The shapes are drawn as ground overlays through `api.gui.mission.setZone`, or as dotted lines through the engine's debug points. You can choose in the mod's settings ("Guideline renderer").
+3. The shapes are drawn as ground overlays through `api.gui.mission.setZone`, or as dotted lines through the engine's debug points. You can choose in the mod's settings ("Guideline renderer").
 
 The guidelines are removed when the segment is built. The builder sends no event when a drag is cancelled, but while dragging every mouse move produces a new proposal. In the game log a proposal followed every cursor movement within 3-5 ms. So when the cursor moves and no proposal follows within 0.1 s, the drag has ended (right-click, Esc, tool closed) and the guidelines are removed. Set `debugLog = true` in `guidelines.script.tl` to log builder events, cursor positions and clear decisions.
 
@@ -40,7 +37,6 @@ The guidelines are removed when the segment is built. The builder sends no event
 Tested in-game: the ground overlay renderer works. Still to verify:
 
 - The debug point API (`api.util.debug.draw`) is bound in the release build. It is missing from the type definitions.
-- A curve that ends on a gold target arrives tangentially. This depends on the builder making circular curves when the start direction is fixed.
 
 The game log (`<Steam>\userdata\<your Steam ID>\3493540\local\crash_dump\stdout.txt`) shows lines starting with `[Precision Guidelines]`: the selected renderer and the first error, if any.
 

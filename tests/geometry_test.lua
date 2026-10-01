@@ -42,68 +42,10 @@ return function(load)
 		assert(nearV(out[1].a, 50, 0))
 	end)
 
-	test("quarter turn onto a crossing line", function()
-		local arcs = g.tangentArcs(g.vec(0, 0), g.vec(1, 0), line(100, -50, 0, 1), 8, 3000)
-		assert(#arcs == 2, "got " .. #arcs .. " arcs")
-		for _, arc in ipairs(arcs) do
-			assert(near(arc.r, 100, 1e-6), "radius " .. arc.r)
-			assert(near(arc.sweep, math.pi / 2, 1e-9), "sweep " .. arc.sweep)
-			assert(nearV(arc.t, 100, 100 * arc.sign, 1e-6), "target " .. arc.t.x .. "," .. arc.t.y)
-		end
-	end)
-
-	test("half turn onto a parallel line", function()
-		local arcs = g.tangentArcs(g.vec(0, 0), g.vec(1, 0), line(-20, 50, 1, 0), 8, 3000)
-		assert(#arcs == 1, "got " .. #arcs .. " arcs")
-		assert(near(arcs[1].r, 25) and nearV(arcs[1].t, 0, 50, 1e-6))
-	end)
-
-	test("no arc onto a line behind the start", function()
-		local arcs = g.tangentArcs(g.vec(0, 0), g.vec(1, 0), line(-100, 0, 0, 1), 8, 3000)
-		assert(#arcs == 0, "got " .. #arcs .. " arcs")
-	end)
-
-	test("oblique merge ends tangent to the line", function()
-		-- road crossing 100 m ahead at 60 degrees: a left turn of 60 degrees with
-		-- r = 100 * tan(60) merges into it
-		local u = g.vec(math.cos(math.rad(60)), math.sin(math.rad(60)))
-		local arcs = g.tangentArcs(g.vec(0, 0), g.vec(1, 0), { a = g.vec(100, 0), u = u }, 8, 3000)
-		local found = false
-		for _, arc in ipairs(arcs) do
-			local radial = g.vec(arc.t.x - arc.c.x, arc.t.y - arc.c.y)
-			assert(near(radial.x * u.x + radial.y * u.y, 0, 1e-6), "not tangent")
-			assert(near(g.dist(arc.c, arc.s), arc.r, 1e-6), "start not on circle")
-			if arc.sign == 1 then
-				found = near(arc.r, 100 * math.tan(math.rad(60)), 1e-6) and near(arc.sweep, math.rad(60), 1e-9)
-			end
-		end
-		assert(found, "left merge arc missing")
-	end)
-
-	test("no single arc onto a diverging line", function()
-		local u = g.vec(math.cos(math.rad(30)), math.sin(math.rad(30)))
-		assert(#g.tangentArcs(g.vec(0, 0), g.vec(1, 0), { a = g.vec(0, 80), u = u }, 8, 3000) == 0)
-	end)
-
-	test("arc polyline runs from start to target", function()
-		local arc = g.tangentArcs(g.vec(0, 0), g.vec(1, 0), line(100, -50, 0, 1), 8, 3000)[1]
-		local pts = g.arcPoints(arc, 2.0)
-		assert(nearV(pts[1], 0, 0, 1e-9))
-		assert(nearV(pts[#pts], arc.t.x, arc.t.y, 1e-6))
-		for _, p in ipairs(pts) do
-			assert(near(g.dist(p, arc.c), arc.r, 1e-6))
-		end
-	end)
-
 	test("ribbon outlines a segment", function()
 		local poly = g.ribbon({ g.vec(0, 0), g.vec(10, 0) }, 2)
 		assert(#poly == 4)
 		assert(nearV(poly[1], 0, 1) and nearV(poly[2], 10, 1) and nearV(poly[3], 10, -1) and nearV(poly[4], 0, -1))
-	end)
-
-	test("turn angle direction", function()
-		assert(near(g.turnAngle(g.vec(1, 0), g.vec(0, 1), 1), math.pi / 2))
-		assert(near(g.turnAngle(g.vec(1, 0), g.vec(0, 1), -1), 3 * math.pi / 2))
 	end)
 
 	-- segments as read from a proposal: nodes, positions and tangents
@@ -122,7 +64,7 @@ return function(load)
 		}
 		local chain = g.findChain(segs, g.vec(99, 21))
 		assert(nearV(chain.e, 100, 20) and nearV(chain.s, 0, 0))
-		assert(nearV(chain.dirE, 50, 40) and nearV(chain.dirS, 50, 0))
+		assert(nearV(chain.dirE, 50, 40))
 	end)
 
 	test("chain stops where the drag start splits a street", function()
@@ -135,7 +77,7 @@ return function(load)
 		}
 		local chain = g.findChain(segs, g.vec(1, 79))
 		assert(nearV(chain.e, 0, 80) and nearV(chain.s, 0, 0), "start " .. chain.s.x .. "," .. chain.s.y)
-		assert(nearV(chain.dirS, 0, 80) and nearV(chain.dirE, 0, 80))
+		assert(nearV(chain.dirE, 0, 80) and chain.startNode == -1)
 		assert(chain.segments[3] and not chain.segments[1] and not chain.segments[2])
 	end)
 
