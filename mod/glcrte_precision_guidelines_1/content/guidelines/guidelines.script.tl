@@ -15,11 +15,8 @@ local CONFIG <const> = {
 	searchRadius = 100.0,
 	-- m: the same for open road ends
 	openEndRadius = 300.0,
-	-- m: guidelines of intersections further away from the dragged end are not
-	-- drawn, and neither are crossing points
+	-- m: guidelines further away from the dragged end are not drawn
 	showDistance = 40.0,
-	-- m: the same for guidelines of open road ends
-	openEndShowDistance = 300.0,
 	maxLines = 8,
 	-- m: the dragged end counts as "on" a guideline within this distance
 	hitTolerance = 0.3,
@@ -60,8 +57,6 @@ end
 local record Line
 	a : V2
 	u : V2
-	-- m: shown while the dragged end is at most this far from the ray
-	reach : number
 end
 
 local function vec(x : number, y : number) : V2
@@ -148,9 +143,9 @@ local function dedupe(lines : {Line}, ref : V2) : {Line}
 		local merged = false
 		for i, o in ipairs(out) do
 			if sameLine(l, o) then
-				local reach = math.max(l.reach or 0, o.reach or 0)
-				local keep = dist(l.a, ref) < dist(o.a, ref) and l or o
-				out[i] = { a = keep.a, u = keep.u, reach = reach }
+				if dist(l.a, ref) < dist(o.a, ref) then
+					out[i] = l
+				end
 				merged = true
 				break
 			end
@@ -444,8 +439,7 @@ local function addEdgeLines(edge : Engine.Entity, out : {Line}, e : V2, degrees 
 			local radius = degree == 1 and CONFIG.openEndRadius or CONFIG.searchRadius
 			if not skipNodes[node] and degree ~= 2 and dist(a, e) <= radius then
 				for __, u in ipairs(rayDirections(outward, leavingDirections(node))) do
-					table.insert(out, { a = a, u = u,
-						reach = degree == 1 and CONFIG.openEndShowDistance or CONFIG.showDistance })
+					table.insert(out, { a = a, u = u })
 				end
 			end
 		end
@@ -515,7 +509,7 @@ local function buildShapes(sp : Proposal.StreetProposal, mouse : V2) : {Shape}
 		-- only guides ahead of its anchor
 		if dist(l.a, E) > 1.0 and dist(l.a, S) > 1.0 and along(l, E) > 0 then
 			local d = math.abs(signedDistance(l, E))
-			if d < (l.reach or CONFIG.showDistance) then
+			if d < CONFIG.showDistance then
 				table.insert(visible, { line = l, d = d })
 			end
 		end
