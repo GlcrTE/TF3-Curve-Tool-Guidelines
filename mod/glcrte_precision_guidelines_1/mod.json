@@ -1,0 +1,35 @@
+{
+    "cosmetic": true,
+    "dependencies": null,
+    "incompatibilities": null,
+    "modId": "glcrte_precision_guidelines_1",
+    "options": null,
+    "params": [
+        {
+            "defaultIndex": 0,
+            "key": "glcrte_pg_renderer",
+            "name": "Guideline renderer",
+            "tooltip": "How guidelines are drawn. Ground overlay paints them onto the terrain, debug points draws dotted lines.",
+            "uiType": "ComboBox",
+            "values": [
+                "Ground overlay",
+                "Debug points",
+                "Both"
+            ],
+            "yearFrom": 0,
+            "yearTo": 0
+        }
+    ],
+    "postRunScript": {
+        "fileName": ""
+    },
+    "preRunScript": {
+        "fileName": ""
+    },
+    "revision": 1,
+    "runScript": {
+        "fileName": ""
+    },
+    "severityAdd": "None",
+    "severityRemove": "None"
+}
