@@ -5,11 +5,11 @@
             "role": "CREATOR"
         }
     ],
-    "description": "Shows guidelines while you build streets and tracks: the extension and perpendicular of every nearby segment end, their crossing points, and the exact end point of a perfect circular curve from where you started dragging. A guideline turns green when you are on it and gold when the new segment also continues it seamlessly.",
-    "name": "Precision Guidelines",
-    "summary": "Construction guidelines from nearby streets and tracks for precise alignment and perfect curves.",
+    "description": "Shows guidelines while you build streets and tracks: the extension and perpendicular of nearby open road ends and intersections, and the points where those guidelines cross. A guideline turns green when the end you are dragging is on it, and gold when the new road also arrives parallel to it and continues it seamlessly.",
+    "name": "Curve Tool - Guidelines",
+    "summary": "Guidelines from nearby road ends and intersections while you build streets and tracks.",
     "tags": [
         "Script Mod"
     ],
-    "url": "https://github.com/GlcrTE/TF3-Precision-Guidelines"
+    "url": "https://github.com/GlcrTE/TF3-Curve-Tool-Guidelines"
 }

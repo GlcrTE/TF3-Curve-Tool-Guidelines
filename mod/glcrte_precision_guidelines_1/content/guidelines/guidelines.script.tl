@@ -1,4 +1,4 @@
--- Precision Guidelines
+-- Curve Tool - Guidelines
 -- While a street or track is being dragged, draws guidelines derived from the
 -- nearby network: the extension and the perpendicular of open road ends and
 -- intersections, and the crossing points of those lines.
@@ -6,7 +6,7 @@
 -- A guideline turns green when the dragged end lies on it, and gold when the
 -- new segment also arrives parallel to it (a seamless continuation).
 
-local MOD_TAG <const> = "[Precision Guidelines]"
+local MOD_TAG <const> = "[Curve Tool - Guidelines]"
 local ZONE_PREFIX <const> = "glcrte_precision_guidelines_"
 local RENDERER_PARAM <const> = "glcrte_pg_renderer"
 
